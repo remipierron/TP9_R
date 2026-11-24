@@ -237,3 +237,169 @@ list.files("sorties")
 ```
 
 En 16 × 9 cm, les textes sont lisibles mais occupent une place importante : la légende, longue, est serrée sous le graphique et peut même être coupée à droite. En 32 × 18 cm, la taille des textes (fixée en points, donc en unité physique) ne change pas alors que la surface double dans chaque dimension : les textes paraissent minuscules par rapport au graphique. Pour obtenir un grand PNG lisible, il faut garder une taille physique raisonnable (par exemple 16 × 9 cm) et augmenter la résolution (`dpi = 600`) : le nombre de pixels augmente sans que les proportions changent. On peut aussi agrandir les textes (`theme(base_size = …)`) ou utiliser l'argument `scale` de `ggsave()`.
+
+# Partie B
+
+## B1
+
+### a. Importer et explorer
+
+```{r b1a}
+ble <- read_delim("data/ble_anova2.csv", delim = ";", show_col_types = FALSE) |>
+  mutate(variete = factor(variete),
+         phyto   = factor(phyto))
+ble
+
+count(ble, variete, phyto)
+```
+
+Chaque combinaison variété × traitement compte 10 parcelles : le plan d'expérience est équilibré (4 × 2 × 10 = 80 parcelles).
+
+### b. Boîtes à moustaches par variété
+
+```{r b1b}
+ggplot(ble, aes(x = fct_reorder(variete, rdt, .fun = median), y = rdt)) +
+  geom_boxplot(outlier.shape = NA) +
+  geom_jitter(width = 0.15, alpha = 0.5) +
+  labs(x = "Variété", y = "Rendement (kg/ha)")
+```
+
+Les variétés sont triées par rendement médian croissant : V3 a les rendements les plus faibles (médiane d'environ 5 450 kg/ha) et V4 les plus élevés (environ 5 780 kg/ha). V2 est la variété la plus dispersée.
+
+`outlier.shape = NA` évite d'afficher deux fois les valeurs extrêmes, puisque toutes les observations sont déjà superposées.
+
+## B2
+
+### a. Boîtes côte à côte
+
+```{r b2a}
+ggplot(ble, aes(x = variete, y = rdt, fill = phyto)) +
+  geom_boxplot(outlier.shape = NA) +
+  geom_point(position = position_jitterdodge(jitter.width = 0.15),
+             alpha = 0.6) +
+  labs(x = "Variété", y = "Rendement (kg/ha)", fill = "Traitement")
+```
+
+### b. Avec des facettes
+
+```{r b2b}
+ggplot(ble, aes(x = phyto, y = rdt, fill = phyto)) +
+  geom_boxplot(outlier.shape = NA, show.legend = FALSE) +
+  geom_jitter(width = 0.15, alpha = 0.6) +
+  facet_wrap(vars(variete), nrow = 1) +
+  labs(x = "Traitement", y = "Rendement (kg/ha)")
+```
+
+Les deux graphiques permettent les deux comparaisons, mais pas avec la même facilité. Avec les facettes, les deux boîtes d'une même variété sont isolées dans leur panneau : la comparaison avec et sans traitement est immédiate, alors que comparer les variétés demande de passer d'un panneau à l'autre. Avec les boîtes côte à côte, les quatre variétés sont alignées sur un même axe horizontal : c'est la comparaison entre variétés qui est la plus facile. Ici, les deux graphiques montrent que l'écart entre variétés est bien plus marqué que l'écart dû au traitement.
+
+## B3
+
+### a. Moyennes et intervalles de confiance
+
+```{r b3a}
+resume_ble <- ble |>
+  group_by(variete, phyto) |>
+  summarise(moyenne    = mean(rdt),
+            ecart_type = sd(rdt),
+            n          = n(),
+            .groups    = "drop") |>
+  mutate(demi_ic = qt(0.975, df = n - 1) * ecart_type / sqrt(n),
+         ic_bas  = moyenne - demi_ic,
+         ic_haut = moyenne + demi_ic)
+resume_ble
+```
+
+### b. `geom_pointrange()`
+
+```{r b3b}
+decalage <- position_dodge(width = 0.4)
+
+ggplot(resume_ble, aes(x = variete, y = moyenne, colour = phyto)) +
+  geom_pointrange(aes(ymin = ic_bas, ymax = ic_haut), position = decalage) +
+  labs(x = "Variété", y = "Rendement moyen (kg/ha)", colour = "Traitement",
+       title = "Rendement moyen et intervalle de confiance à 95 %")
+```
+
+### c. Avec `stat_summary()`
+
+```{r b3c}
+ggplot(ble, aes(x = variete, y = rdt, colour = phyto)) +
+  stat_summary(fun.data = mean_cl_normal, geom = "pointrange",
+               position = decalage) +
+  labs(x = "Variété", y = "Rendement moyen (kg/ha)", colour = "Traitement",
+       title = "Même graphique avec stat_summary(fun.data = mean_cl_normal)")
+
+# Vérification numérique : mean_cl_normal() utilise aussi la loi de Student
+verif <- ble |>
+  group_by(variete, phyto) |>
+  summarise(Hmisc::smean.cl.normal(rdt) |> as.list() |> as_tibble(),
+            .groups = "drop") |>
+  left_join(resume_ble, by = c("variete", "phyto"))
+
+all.equal(verif$Lower, verif$ic_bas)
+all.equal(verif$Upper, verif$ic_haut)
+```
+
+Les deux graphiques sont identiques et la comparaison numérique renvoie `TRUE` : `mean_cl_normal()` calcule le même intervalle de Student à 95 % que notre calcul manuel.
+
+## B4
+
+### a. Graphiques d'interaction
+
+```{r b4a}
+p_inter_1 <- ggplot(resume_ble, aes(x = variete, y = moyenne, colour = phyto)) +
+  geom_line(aes(group = phyto)) +
+  geom_point() +
+  labs(x = "Variété", y = "Rendement moyen (kg/ha)", colour = "Traitement")
+
+p_inter_2 <- ggplot(resume_ble, aes(x = phyto, y = moyenne, colour = variete)) +
+  geom_line(aes(group = variete)) +
+  geom_point() +
+  labs(x = "Traitement", y = "Rendement moyen (kg/ha)", colour = "Variété")
+
+p_inter_1 + p_inter_2
+```
+
+### b. Interprétation
+
+Les lignes ne sont pas parfaitement parallèles : sur le premier graphique, les deux courbes se croisent (le traitement est légèrement favorable pour V2 et V4, légèrement défavorable pour V1 et V3). Mais ces écarts sont minimes (entre 10 et 30 kg/ha environ), bien plus petits que la largeur des intervalles de confiance vus en B3 : on ne peut pas conclure à une interaction. Sur le second graphique, les lignes sont presque horizontales : le traitement ne change pratiquement pas le rendement (5 612 kg/ha en moyenne avec, 5 605 sans). Le traitement phytosanitaire n'a donc pas d'intérêt visible sur le rendement dans cet essai, quelle que soit la variété ; c'est le choix de la variété qui compte.
+
+## B5
+
+### a. Barres avec un axe qui commence à 0
+
+```{r b5a}
+moy_variete <- ble |>
+  group_by(variete) |>
+  summarise(moyenne = mean(rdt))
+
+p_barres <- ggplot(moy_variete, aes(x = variete, y = moyenne)) +
+  geom_col(fill = "steelblue") +
+  labs(x = "Variété", y = "Rendement moyen (kg/ha)")
+p_barres
+```
+
+### b. Zoom sur 5 400 – 5 800 kg/ha
+
+```{r b5b}
+p_barres + coord_cartesian(ylim = c(5400, 5800))
+
+ecart_v4_v3 <- moy_variete |>
+  summarise(ecart_pct = 100 * (moyenne[variete == "V4"] / moyenne[variete == "V3"] - 1))
+ecart_v4_v3
+```
+
+Avec l'axe qui part de 0, les quatre barres paraissent presque identiques : l'écart entre V3 et V4 semble négligeable. Avec le zoom, la barre de V4 paraît environ cinq fois plus haute que celle de V3 : l'écart semble énorme. En réalité, V4 produit en moyenne `r round(ecart_v4_v3$ecart_pct, 1)` % de plus que V3. Le second graphique est trompeur, car la longueur d'une barre est lue comme une quantité : une barre doit toujours partir de 0.
+
+### c. Une représentation honnête
+
+```{r b5c}
+ggplot(ble, aes(x = fct_reorder(variete, rdt), y = rdt)) +
+  geom_jitter(width = 0.1, alpha = 0.3, colour = "grey40") +
+  stat_summary(fun.data = mean_cl_normal, colour = "firebrick", size = 0.6) +
+  labs(x = "Variété", y = "Rendement (kg/ha)",
+       title = "V4 produit environ 5 % de plus que V3",
+       subtitle = "Parcelles (gris) et moyenne avec intervalle de confiance à 95 % (rouge)")
+```
+
+Plutôt que des barres, on représente les moyennes par des points avec leur intervalle de confiance, superposés aux parcelles individuelles. Un point n'est pas lu comme une longueur, l'axe n'a donc pas besoin de partir de 0 : on peut zoomer sans tromper. Les observations et les intervalles donnent l'échelle de la variabilité, ce qui permet de juger si l'écart entre variétés est important par rapport aux différences entre parcelles, et le titre donne l'écart en pourcentage.
