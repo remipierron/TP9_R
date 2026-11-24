@@ -403,3 +403,201 @@ ggplot(ble, aes(x = fct_reorder(variete, rdt), y = rdt)) +
 ```
 
 Plutôt que des barres, on représente les moyennes par des points avec leur intervalle de confiance, superposés aux parcelles individuelles. Un point n'est pas lu comme une longueur, l'axe n'a donc pas besoin de partir de 0 : on peut zoomer sans tromper. Les observations et les intervalles donnent l'échelle de la variabilité, ce qui permet de juger si l'écart entre variétés est important par rapport aux différences entre parcelles, et le titre donne l'écart en pourcentage.
+
+# Partie C
+
+## C1
+
+### a. Charger les données
+
+```{r c1a}
+objets <- load("data/paysniv3.RData")
+objets
+class(paysniv3)
+
+pays_df <- as_tibble(paysniv3)
+pays_df
+```
+
+`load()` crée un seul objet, `paysniv3`, un `data.frame` de 173 lignes (les pays) et 25 colonnes (les indicateurs), que l'on convertit en tibble.
+
+### b. Continent et nom des pays
+
+```{r c1b}
+pays_df <- pays_df |>
+  mutate(continent = factor(CONTI, levels = 1:5,
+                            labels = c("Afrique", "Asie", "Amériques",
+                                       "Europe", "Océanie")),
+         pays = str_to_title(NOM))
+
+count(pays_df, continent)
+```
+
+### c. Valeurs manquantes
+
+```{r c1c}
+pays_df |>
+  summarise(across(everything(), \(x) sum(is.na(x)))) |>
+  pivot_longer(everything(), names_to = "variable", values_to = "nb_manquants") |>
+  filter(nb_manquants > 0) |>
+  arrange(desc(nb_manquants))
+```
+
+Neuf variables ont des valeurs manquantes. L'accès à l'eau potable (`EAU`) en a le plus (90 pays sur 173, plus de la moitié), suivi de la consommation d'énergie (`ENERG`, 36) et de son évolution (`ENERT`, 35). Le PNB par habitant manque pour 10 pays, ce qui comptera en C3. Les autres manques sont rares (`DOUB` 4, `URBA` 3, `CULTU`, `PATUR`, `FORET` 2, `SURF` 1). Les variables utilisées en C2 (`FERTI`, `ESPER`) sont complètes.
+
+## C2
+
+### a. Espérance de vie et fécondité
+
+```{r c2a}
+p_fecond <- ggplot(pays_df, aes(x = FERTI, y = ESPER)) +
+  geom_point(aes(colour = continent)) +
+  geom_smooth(method = "lm", formula = y ~ x, colour = "black") +
+  labs(x = "Fécondité (enfants par femme)",
+       y = "Espérance de vie (années)",
+       colour = "Continent")
+p_fecond
+```
+
+La couleur est placée dans `geom_point()` et non dans `ggplot()` : sinon `geom_smooth()` tracerait une droite par continent au lieu d'une droite unique.
+
+### b. Corrélation
+
+```{r c2b}
+cor_fecond <- cor(pays_df$FERTI, pays_df$ESPER)
+cor_fecond
+```
+
+La corrélation vaut `r round(cor_fecond, 2)` : le lien est fort et négatif, plus la fécondité est élevée, plus l'espérance de vie est faible. Les pays d'Afrique occupent la zone en bas à droite (forte fécondité, souvent plus de 6 enfants par femme, et espérance de vie autour de 50 ans), les pays d'Europe la zone en haut à gauche (moins de 2,5 enfants par femme et plus de 70 ans). Les pays d'Asie et des Amériques s'étalent entre les deux, le long de la droite.
+
+## C3
+
+### a. Richesse et santé
+
+```{r c3a}
+pays_pnb <- pays_df |> filter(!is.na(PNB))
+
+p_richesse <- ggplot(pays_pnb, aes(x = PNB, y = ESPER)) +
+  geom_point(aes(size = POP87, colour = continent), alpha = 0.7) +
+  scale_x_log10(labels = scales::label_dollar()) +
+  scale_size_area(max_size = 15) +
+  labs(x = "PNB par habitant (dollars, échelle logarithmique)",
+       y = "Espérance de vie (années)",
+       size = "Population\n(millions)", colour = "Continent")
+p_richesse
+```
+
+Les 10 pays sans PNB sont retirés avant le graphique. Le PNB par habitant va d'environ 100 à près de 20 000 dollars et la plupart des pays sont pauvres : sur une échelle linéaire, ils seraient tous tassés contre l'axe vertical, et quelques pays riches occuperaient tout l'espace. L'échelle logarithmique répartit les pays et transforme la relation, très courbée (l'espérance de vie augmente vite pour les premiers dollars puis plafonne), en une relation à peu près linéaire.
+
+### b. Nommer quelques pays
+
+```{r c3b}
+pays_a_nommer <- pays_pnb |>
+  slice_max(POP87, n = 10) |>
+  bind_rows(filter(pays_pnb, pays %in% c("France", "Senegal")))
+
+p_richesse +
+  ggrepel::geom_text_repel(data = pays_a_nommer, aes(label = pays),
+                           size = 3, min.segment.length = 0)
+```
+
+### c. Pays plus en bonne santé que leur richesse ne le laisse prévoir
+
+```{r c3c}
+modele_richesse <- lm(ESPER ~ log10(PNB), data = pays_pnb)
+
+pays_pnb |>
+  mutate(ecart = residuals(modele_richesse)) |>
+  slice_max(ecart, n = 8) |>
+  select(pays, continent, PNB, ESPER, ecart)
+```
+
+Les pays nettement au-dessus du nuage sont, à richesse égale, ceux qui vivent le plus longtemps. Pour les repérer précisément, on calcule l'écart à la droite de régression de l'espérance de vie sur le logarithme du PNB. Le Sri Lanka (70 ans pour 370 dollars) et la Chine (66 ans pour 310 dollars) sont les cas les plus visibles, avec plus de 13 ans d'espérance de vie au-dessus des pays de même richesse. On trouve aussi le Costa Rica, la Jamaïque, la Dominique, le Vanuatu ou l'Albanie. À l'inverse, certains pays riches du Golfe (Émirats arabes unis, Qatar, Koweït, Brunei) ont une espérance de vie plus faible que les pays européens de même richesse.
+
+## C4
+
+```{r c4, fig.height = 6}
+ggplot(pays_df, aes(x = FERTI, y = ESPER)) +
+  geom_point(data = select(pays_df, -continent), colour = "grey85") +
+  geom_point(aes(colour = continent), show.legend = FALSE) +
+  geom_smooth(aes(colour = continent), method = "lm", formula = y ~ x,
+              se = FALSE, show.legend = FALSE) +
+  facet_wrap(vars(continent)) +
+  labs(x = "Fécondité (enfants par femme)",
+       y = "Espérance de vie (années)")
+
+# Pentes des droites par continent
+pays_df |>
+  group_by(continent) |>
+  summarise(pente = coef(lm(ESPER ~ FERTI))[2], n = n())
+```
+
+En retirant la colonne `continent` des données du fond, ces points ne sont rattachés à aucun panneau et apparaissent donc dans tous les panneaux. Les pentes sont toutes négatives et du même ordre de grandeur : un enfant de plus par femme correspond à environ 3 à 4 ans d'espérance de vie en moins en Afrique, en Asie, en Amériques et en Europe. La pente est un peu plus forte en Afrique (−4,2) et plus faible en Océanie (−2,2), mais l'Océanie ne compte que 9 pays : sa droite est peu fiable. La relation est donc semblable sur tous les continents.
+
+## C5
+
+### a. Matrice des corrélations
+
+```{r c5a}
+variables <- c("NAT", "MORT", "ESPER", "FERTI", "MORTI", "URBA", "PNB", "AGE15")
+
+mat_cor <- cor(pays_df[variables], use = "pairwise.complete.obs")
+round(mat_cor, 2)
+```
+
+### b. Carte de chaleur
+
+```{r c5b}
+cor_long <- as_tibble(mat_cor, rownames = "var1") |>
+  pivot_longer(-var1, names_to = "var2", values_to = "correlation")
+
+ggplot(cor_long, aes(x = var1, y = var2, fill = correlation)) +
+  geom_tile(colour = "white") +
+  geom_text(aes(label = round(correlation, 2)), size = 3) +
+  scale_fill_gradient2(low = "firebrick", mid = "white", high = "dodgerblue",
+                       midpoint = 0, limits = c(-1, 1)) +
+  coord_fixed() +
+  labs(x = NULL, y = NULL, fill = "Corrélation")
+```
+
+### c. Ordonner les variables
+
+```{r c5c}
+ordre <- c("NAT", "FERTI", "AGE15", "MORTI", "MORT", "ESPER", "URBA", "PNB")
+
+cor_long |>
+  mutate(var1 = factor(var1, levels = ordre),
+         var2 = factor(var2, levels = rev(ordre))) |>
+  ggplot(aes(x = var1, y = var2, fill = correlation)) +
+  geom_tile(colour = "white") +
+  geom_text(aes(label = round(correlation, 2)), size = 3) +
+  scale_fill_gradient2(low = "firebrick", mid = "white", high = "dodgerblue",
+                       midpoint = 0, limits = c(-1, 1)) +
+  coord_fixed() +
+  labs(x = NULL, y = NULL, fill = "Corrélation")
+```
+
+Une fois les variables ordonnées, deux blocs bleus apparaissent, séparés par des cases rouges. Le premier groupe réunit la natalité, la fécondité, la part des moins de 15 ans et les mortalités infantile et générale : ce sont les indicateurs d'une population jeune à forte natalité et forte mortalité. Le second groupe réunit l'espérance de vie, l'urbanisation et le PNB par habitant : ce sont les indicateurs du développement. Les variables d'un même groupe sont corrélées positivement entre elles (jusqu'à 0,98 entre natalité et fécondité), et négativement avec celles de l'autre groupe (−0,97 entre espérance de vie et mortalité infantile).
+
+## C6
+
+```{r c6}
+top_pnb <- pays_df |>
+  slice_max(PNB, n = 15) |>
+  mutate(europe = continent == "Europe")
+
+nb_europe <- sum(top_pnb$europe)
+
+ggplot(top_pnb, aes(x = PNB, y = fct_reorder(pays, PNB), fill = europe)) +
+  geom_col() +
+  geom_text(aes(label = scales::label_dollar(big.mark = " ")(PNB)), hjust = -0.1, size = 3) +
+  scale_fill_manual(values = c(`TRUE` = "firebrick", `FALSE` = "grey70"),
+                    guide = "none") +
+  scale_x_continuous(labels = scales::label_dollar(big.mark = " "),
+                     expand = expansion(mult = c(0, 0.15))) +
+  labs(x = "PNB par habitant en 1987 (dollars)", y = NULL,
+       title = paste(nb_europe, "des 15 pays les plus riches par habitant sont européens"),
+       subtitle = "PNB par habitant en 1987 ; pays européens en rouge")
+```
+
+Le graphique montre que, en 1987, près de la moitié des 15 pays au plus fort PNB par habitant sont européens (Suisse, Norvège, Luxembourg, Suède, Danemark, Allemagne de l'Ouest, Finlande). Les premières places sont toutefois occupées par des pays pétroliers du Golfe (Émirats arabes unis, Brunei) et par les États-Unis.

@@ -3,7 +3,7 @@
     "path": "E:/R/tp8/tp8/tp8_pierron_remi.Rmd",
     "project_path": "tp8_pierron_remi.Rmd",
     "type": "r_markdown",
-    "hash": "3196850953",
+    "hash": "626369268",
     "contents": "",
     "dirty": false,
     "created": 1795516498905.0,
@@ -12,16 +12,16 @@
     "properties": {
         "source_window_id": "",
         "Source": "Source",
-        "cursorPosition": "391,143",
-        "scrollLine": "386",
+        "cursorPosition": "602,319",
+        "scrollLine": "580",
         "last_setup_crc32": "422ba8a027da61de"
     },
     "folds": "",
-    "lastKnownWriteTime": 1795519244,
+    "lastKnownWriteTime": 1795523546,
     "encoding": "UTF-8",
     "collab_server": "",
     "source_window": "",
-    "last_content_update": 1795519243147,
+    "last_content_update": 1795523544307,
     "read_only": false,
     "read_only_alternatives": []
 }
